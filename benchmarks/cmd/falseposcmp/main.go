@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	bitsbloom "github.com/bits-and-blooms/bloom/v3"
 	qbloom "github.com/nireo/qbloom"
@@ -25,10 +26,10 @@ type samplePoint struct {
 func main() {
 	var (
 		numBits        = flag.Int("num-bits", 1<<12, "fixed bloom filter size in bits")
-		probeBudget    = flag.Int("probe-budget", 2_000_000, "adaptive false-positive probe budget per point")
+		probeBudget    = flag.Int("probe-budget", 100_000_000, "adaptive false-positive probe budget per point")
 		trials         = flag.Int("trials", 16, "number of independent trials")
-		granularity    = flag.Float64("granularity", 128, "controls how many x-axis points are measured")
-		maxItemsPerBit = flag.Float64("max-items-per-bit", 0.125, "stop after reaching this items-per-bit load")
+		granularity    = flag.Float64("granularity", 256, "controls how many x-axis points are measured")
+		maxItemsPerBit = flag.Float64("max-items-per-bit", 0.2, "stop after reaching this items-per-bit load")
 		outDir         = flag.String("out-dir", "Acc", "directory for output CSV files")
 	)
 	flag.Parse()
@@ -58,13 +59,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	pointsPerTrial := countPoints(*numBits, *granularity, *maxItemsPerBit)
+	totalPoints := int64(pointsPerTrial * *trials)
+	progress := newProgressReporter(totalPoints)
+	fmt.Printf("running %d trials across %d points each (%d total points)\n", *trials, pointsPerTrial, totalPoints)
+
 	trialRows := make([][]trialPoint, *trials)
 	var wg sync.WaitGroup
 	for trial := 0; trial < *trials; trial++ {
 		wg.Add(1)
 		go func(trial int) {
 			defer wg.Done()
-			trialRows[trial] = runTrial(trial, *trials, *numBits, *probeBudget, *granularity, *maxItemsPerBit)
+			trialRows[trial] = runTrial(trial, *trials, *numBits, *probeBudget, *granularity, *maxItemsPerBit, progress)
 		}(trial)
 	}
 	wg.Wait()
@@ -100,13 +106,20 @@ type ticks struct {
 	stepSize float64
 }
 
+type progressReporter struct {
+	total       int64
+	reportEvery int64
+	completed   atomic.Int64
+	mu          sync.Mutex
+}
+
 func (t *ticks) next() int {
 	t.cur += 1 << int(t.step)
 	t.step += t.stepSize
 	return t.cur
 }
 
-func runTrial(trial, numTrials, numBits, probeBudget int, granularity, maxItemsPerBit float64) []trialPoint {
+func runTrial(trial, numTrials, numBits, probeBudget int, granularity, maxItemsPerBit float64, progress *progressReporter) []trialPoint {
 	const halfUint64 = ^uint64(0) / 2
 	memberBase := uint64(trial) * (halfUint64 / uint64(numTrials))
 	nonMemberBase := memberBase + halfUint64
@@ -146,6 +159,7 @@ func runTrial(trial, numTrials, numBits, probeBudget int, granularity, maxItemsP
 			qbloomFP:    qbloomFP,
 			bitsFP:      bitsFP,
 		})
+		progress.step()
 
 		prevItems = numItems
 		if load >= maxItemsPerBit {
@@ -218,6 +232,38 @@ func writeSeries(path string, rows []samplePoint) error {
 	}
 
 	return writer.Error()
+}
+
+func countPoints(numBits int, granularity, maxItemsPerBit float64) int {
+	ticker := ticks{stepSize: 1.0 / granularity}
+	count := 0
+	for {
+		numItems := ticker.next()
+		count++
+		if float64(numItems)/float64(numBits) >= maxItemsPerBit {
+			break
+		}
+	}
+	return count
+}
+
+func newProgressReporter(total int64) *progressReporter {
+	reportEvery := total / 100
+	if reportEvery < 1 {
+		reportEvery = 1
+	}
+	return &progressReporter{total: total, reportEvery: reportEvery}
+}
+
+func (p *progressReporter) step() {
+	completed := p.completed.Add(1)
+	if completed != 1 && completed != p.total && completed%p.reportEvery != 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	percent := 100 * float64(completed) / float64(p.total)
+	fmt.Printf("progress %d/%d points (%.1f%%)\n", completed, p.total, percent)
 }
 
 func falsePosRateAdaptiveQBloom(filter *qbloom.Filter, next uint64, probeBudget int) (float64, uint64) {

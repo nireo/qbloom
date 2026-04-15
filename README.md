@@ -4,7 +4,9 @@ A fast bloom filter that is based on the [fastbloom](https://github.com/tomtomwo
 
 ## Benchmark results
 
-Comparison benchmarks against [bits-and-blooms](https://github.com/bits-and-blooms/bloom) live in the isolated module at `benchmarks/bits-and-blooms`. For the parallel benchmarks, `bits-and-blooms` does not provide a thread-safe filter, so the comparison wraps it with a `sync.Mutex`.
+The table compares `qbloom` against [bits-and-blooms](https://github.com/bits-and-blooms/bloom) with matched bit counts and hash counts so the work is directly comparable.
+
+The single-threaded rows measure two things: a combined lookup-and-insert path (`test-and-add`) and a read-only membership check (`contains`), each for both strings and byte slices. The parallel rows compare `qbloom`'s atomic filter against a mutex-protected `bits-and-blooms` filter, since `bits-and-blooms` does not provide a concurrent variant of its own.
 
 
 | Benchmark | qbloom | bits-and-blooms | Speedup |
@@ -20,16 +22,20 @@ Comparison benchmarks against [bits-and-blooms](https://github.com/bits-and-bloo
 
 ## Accuracy
 
-`qbloom` stays aligned with `bits-and-blooms` on false-positive rate even though it does less work per operation. The chart below follows the same kind of setup as `bench-bloom-filters`: fixed-size 4096-bit filters, a sweep over items per bit, the optimal hash count recomputed at each point, and the final line averaged across 16 trials with adaptive false-positive probing.
+`qbloom` stays aligned with `bits-and-blooms` on false-positive rate even though it does less work per operation.
 
-The two lines track very closely across the sweep, which suggests the speedup is not coming from a meaningful false-positive-rate tradeoff. Early `qbloom` points with zero observed false positives are shown at the run's detection floor so they remain visible on the log-scale chart.
+The chart uses fixed-size 4096-bit filters and sweeps the load from low occupancy to `0.2` items per bit. At each x-axis point both implementations are rebuilt for that exact load, given the same bit budget, and configured with the hash count that is optimal for the current number of inserted items. Each plotted value is then averaged across 16 independent trials.
 
-![Accuracy comparison](benchmarks/bits-and-blooms/false_positive_rate.png)
+For every trial, one set of values is inserted into the filter and a disjoint set of non-members is used for false-positive checks. The y-axis is logarithmic because the interesting part of the comparison spans several orders of magnitude, from near-zero false-positive rates at low occupancy to much higher rates as the filter fills up.
+
+The two lines track very closely across the sweep, which suggests the speedup is not coming from a meaningful false-positive-rate tradeoff. The plotted image is cropped to the `0.02` to `0.125` items-per-bit range to focus on the most readable part of the curve. Points with zero observed false positives are omitted on the log-scale chart because a log axis cannot represent zero.
+
+![Accuracy comparison](benchmarks/false_positive_rate.png)
 
 Reproduce the accuracy data and graph:
 
 ```sh
-cd benchmarks/bits-and-blooms
+cd benchmarks
 go run ./cmd/falseposcmp -out-dir Acc
 python3 -m venv .venv
 .venv/bin/pip install matplotlib

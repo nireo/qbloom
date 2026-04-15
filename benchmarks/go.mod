@@ -1,4 +1,4 @@
-module github.com/nireo/qbloom/benchmarks/bits-and-blooms
+module github.com/nireo/qbloom/benchmarks
 
 go 1.26
 
@@ -14,4 +14,4 @@ require (
 	golang.org/x/sys v0.30.0 // indirect
 )
 
-replace github.com/nireo/qbloom => ../..
+replace github.com/nireo/qbloom => ..

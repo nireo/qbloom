@@ -10,10 +10,6 @@ from matplotlib.ticker import FuncFormatter
 
 plt.rcParams["font.size"] = 18
 
-PROBE_BUDGET = 2_000_000
-TRIALS = 16
-DETECTION_FLOOR = 100.0 / (PROBE_BUDGET * TRIALS)
-
 
 def read_series(path: str):
     rows = []
@@ -56,10 +52,10 @@ def main() -> int:
         x = []
         avg = []
         for row in rows:
-            x.append(row[0])
             value = row[1] * 100.0
             if value <= 0:
-                value = DETECTION_FLOOR
+                continue
+            x.append(row[0])
             avg.append(value)
         ax.plot(x, avg, color=color, label=name, linewidth=2.2)
 
@@ -67,8 +63,8 @@ def main() -> int:
     ax.set_title("Bloom Filter False Positives (Lower is Better)")
     ax.set_xlabel("Items Per Bit")
     ax.set_ylabel("False Positive %")
-    ax.set_xlim(left=0)
-    ax.set_xlim(right=0.125)
+    ax.set_xlim(left=0.02, right=0.125)
+    ax.set_xticks([0.02, 0.04, 0.06, 0.08, 0.10, 0.12])
     ax.set_ylim(bottom=0.00000001, top=100)
     ax.yaxis.set_major_formatter(FuncFormatter(format_y))
     ax.grid(True, which="major", alpha=0.35)
