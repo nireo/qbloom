@@ -26,10 +26,10 @@ type samplePoint struct {
 func main() {
 	var (
 		numBits        = flag.Int("num-bits", 1<<12, "fixed bloom filter size in bits")
-		probeBudget    = flag.Int("probe-budget", 100_000_000, "adaptive false-positive probe budget per point")
+		probeBudget    = flag.Int("probe-budget", 2_000_000, "adaptive false-positive probe budget per point")
 		trials         = flag.Int("trials", 16, "number of independent trials")
-		granularity    = flag.Float64("granularity", 256, "controls how many x-axis points are measured")
-		maxItemsPerBit = flag.Float64("max-items-per-bit", 0.2, "stop after reaching this items-per-bit load")
+		granularity    = flag.Float64("granularity", 128, "controls how many x-axis points are measured")
+		maxItemsPerBit = flag.Float64("max-items-per-bit", 0.125, "stop after reaching this items-per-bit load")
 		outDir         = flag.String("out-dir", "Acc", "directory for output CSV files")
 	)
 	flag.Parse()

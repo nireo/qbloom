@@ -2,6 +2,10 @@
 
 A fast bloom filter that is based on the [fastbloom](https://github.com/tomtomwombat/fastbloom) implementation in Rust. The general speed-up comes from only requiring a single hash per item as compared to multiple in regular implementations. The optimizations are based on [this](https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf) paper. In addition, this implementation provides an atomic bloom filter that supports concurrent writes without relying on a mutex as compared to many other bloom filters.
 
+The main idea is that `qbloom` does not compute `k` separate full hashes for every insert or lookup. It hashes the input once with `xxh3`, uses that as the first bit position, and then derives the remaining positions with a cheap recurrence in registers instead of rehashing the original bytes each time. The filter still checks or sets the same number of bits as a conventional Bloom filter, but most of the work moves from repeated hashing to simple integer operations. Bit indices are also mapped with the high half of a 64-bit multiply instead of a modulo, which avoids a division on the hot path.
+
+The storage layout is just a slice of 64-bit words, so each derived index becomes one word load and one bit mask operation. The atomic variant keeps the same layout but replaces plain word updates with atomic `Or` operations on those 64-bit words, which allows concurrent inserts without a global lock. That is why the implementation can be substantially faster while still tracking the same false-positive behavior as more traditional Bloom filters when the bit budget and hash count are matched.
+
 ## Benchmark results
 
 The table compares `qbloom` against [bits-and-blooms](https://github.com/bits-and-blooms/bloom) with matched bit counts and hash counts so the work is directly comparable.
@@ -24,7 +28,7 @@ The single-threaded rows measure two things: a combined lookup-and-insert path (
 
 `qbloom` stays aligned with `bits-and-blooms` on false-positive rate even though it does less work per operation.
 
-The chart uses fixed-size 4096-bit filters and sweeps the load from low occupancy to `0.2` items per bit. At each x-axis point both implementations are rebuilt for that exact load, given the same bit budget, and configured with the hash count that is optimal for the current number of inserted items. Each plotted value is then averaged across 16 independent trials.
+The chart uses fixed-size 4096-bit filters and sweeps the load from low occupancy to `0.125` items per bit. At each x-axis point both implementations are rebuilt for that exact load, given the same bit budget, and configured with the hash count that is optimal for the current number of inserted items. Each plotted value is then averaged across 16 independent trials.
 
 For every trial, one set of values is inserted into the filter and a disjoint set of non-members is used for false-positive checks. The y-axis is logarithmic because the interesting part of the comparison spans several orders of magnitude, from near-zero false-positive rates at low occupancy to much higher rates as the filter fills up.
 
