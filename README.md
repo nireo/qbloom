@@ -1,7 +1,5 @@
 # qbloom: very fast bloom filter for go
 
-## Table of contents
-
 - [Usage examples](#usage-examples)
 - [Benchmarks](#benchmarks)
 - [Accuracy](#accuracy)
@@ -89,24 +87,7 @@ if err := restored.UnmarshalBinary(data); err != nil {
 }
 ```
 
-Encode and decode a filter with gob:
-
-```go
-filter := qbloom.NewFor(10_000, 0.01)
-filter.AddString("user:123")
-
-var buf bytes.Buffer
-if err := gob.NewEncoder(&buf).Encode(filter); err != nil {
-	panic(err)
-}
-
-var restored qbloom.Filter
-if err := gob.NewDecoder(&buf).Decode(&restored); err != nil {
-	panic(err)
-}
-```
-
-The atomic filter supports the same JSON, binary, and gob encodings:
+The atomic filter supports the same JSON and binary encodings:
 
 ```go
 filter := qbloom.NewAtomicFor(10_000, 0.01)
