@@ -1,12 +1,129 @@
 # qbloom: very fast bloom filter for go
 
+## Table of contents
+
+- [Usage examples](#usage-examples)
+- [Benchmarks](#benchmarks)
+- [Accuracy](#accuracy)
+
 A fast bloom filter that is based on the [fastbloom](https://github.com/tomtomwombat/fastbloom) implementation in Rust. The general speed-up comes from only requiring a single hash per item as compared to multiple in regular implementations. The optimizations are based on [this](https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf) paper. In addition, this implementation provides an atomic bloom filter that supports concurrent writes without relying on a mutex as compared to many other bloom filters.
 
 The main idea is that `qbloom` does not compute `k` separate full hashes for every insert or lookup. It hashes the input once with `xxh3`, uses that as the first bit position, and then derives the remaining positions with a cheap recurrence in registers instead of rehashing the original bytes each time. The filter still checks or sets the same number of bits as a conventional Bloom filter, but most of the work moves from repeated hashing to simple integer operations. Bit indices are also mapped with the high half of a 64-bit multiply instead of a modulo, which avoids a division on the hot path.
 
 The storage layout is just a slice of 64-bit words, so each derived index becomes one word load and one bit mask operation. The atomic variant keeps the same layout but replaces plain word updates with atomic `Or` operations on those 64-bit words, which allows concurrent inserts without a global lock. That is why the implementation can be substantially faster while still tracking the same false-positive behavior as more traditional Bloom filters when the bit budget and hash count are matched.
 
-## Benchmark results
+## Usage examples
+
+Create a filter sized for an expected number of items and target false-positive rate:
+
+```go
+package main
+
+import "github.com/nireo/qbloom"
+
+func main() {
+	filter := qbloom.NewFor(1_000_000, 0.01)
+
+	alreadyPresent := filter.AddString("user:123")
+	if !alreadyPresent {
+		// First time this item has probably been seen.
+	}
+
+	if filter.ContainsString("user:123") {
+		// The item may be present. Bloom filters can return false positives.
+	}
+}
+```
+
+Use byte slices when the item is already encoded:
+
+```go
+filter := qbloom.New(4096, 4)
+
+filter.Add([]byte("cache-key"))
+if filter.Contains([]byte("cache-key")) {
+	// The item may be present.
+}
+```
+
+Use the atomic filter for concurrent writes:
+
+```go
+filter := qbloom.NewAtomicFor(1_000_000, 0.01)
+
+go filter.AddString("worker-a:item")
+go filter.AddString("worker-b:item")
+```
+
+Encode and restore a filter with the standard JSON interfaces:
+
+```go
+filter := qbloom.NewFor(10_000, 0.01)
+filter.AddString("user:123")
+
+data, err := json.Marshal(filter)
+if err != nil {
+	panic(err)
+}
+
+var restored qbloom.Filter
+if err := json.Unmarshal(data, &restored); err != nil {
+	panic(err)
+}
+```
+
+Use the binary marshaling interfaces for compact persistence:
+
+```go
+filter := qbloom.NewFor(10_000, 0.01)
+filter.AddString("user:123")
+
+data, err := filter.MarshalBinary()
+if err != nil {
+	panic(err)
+}
+
+var restored qbloom.Filter
+if err := restored.UnmarshalBinary(data); err != nil {
+	panic(err)
+}
+```
+
+Encode and decode a filter with gob:
+
+```go
+filter := qbloom.NewFor(10_000, 0.01)
+filter.AddString("user:123")
+
+var buf bytes.Buffer
+if err := gob.NewEncoder(&buf).Encode(filter); err != nil {
+	panic(err)
+}
+
+var restored qbloom.Filter
+if err := gob.NewDecoder(&buf).Decode(&restored); err != nil {
+	panic(err)
+}
+```
+
+The atomic filter supports the same JSON, binary, and gob encodings:
+
+```go
+filter := qbloom.NewAtomicFor(10_000, 0.01)
+filter.AddString("user:123")
+
+data, err := filter.MarshalBinary()
+if err != nil {
+	panic(err)
+}
+
+var restored qbloom.AtomicFilter
+if err := restored.UnmarshalBinary(data); err != nil {
+	panic(err)
+}
+```
+
+## Benchmarks
 
 The table compares `qbloom` against [bits-and-blooms](https://github.com/bits-and-blooms/bloom) with matched bit counts and hash counts so the work is directly comparable.
 
